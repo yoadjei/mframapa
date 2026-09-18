@@ -8,9 +8,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useStore } from '../store/useStore';
+import { PollutantReading, useStore } from '../store/useStore';
 import { getDailyFact } from '../services/api';
 import { fetchPredictionAtCoords } from '../services/prediction';
+import { ContributingFactorsGrid } from '../components/ContributingFactorsGrid';
+import { InsightsSection } from '../components/InsightsSection';
+import { PollutantDetailSheet } from '../components/PollutantDetailSheet';
 import { isAfricanCountryCode } from '../utils/africanCountries';
 import { OfflineBanner } from '../components/OfflineBanner';
 import { getColors, Colors } from '../theme';
@@ -18,7 +21,6 @@ import { getAQIColor } from '../theme/colors';
 import { useTheme } from '../hooks/useTheme';
 import { useTranslation } from '../hooks/useTranslation';
 import { aqiCategoryKey } from '../utils/i18nHelpers';
-import { cleanGuidanceText } from '../utils/cleanGuidanceText';
 import { MframapaLogo } from '../components/MframapaLogo';
 import { useRateLimit } from '../hooks/useRateLimit';
 
@@ -34,6 +36,8 @@ export function HomeScreen() {
   const language       = useStore((s) => s.language);
   const addNotification = useStore((s) => s.addNotification);
   const unreadCount    = useStore((s) => s.notifications.filter((n) => !n.read).length);
+  const isAuthenticated = useStore((s) => s.isAuthenticated);
+  const fullName        = useStore((s) => s.profile.fullName);
 
   // Same fact as the quiet-day push — surface on Home and once/day in Alerts.
   const [fact, setFact] = useState('');
@@ -69,6 +73,7 @@ export function HomeScreen() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
+  const [selectedPollutant, setSelectedPollutant] = useState<PollutantReading | null>(null);
   const { secondsRemaining, isRateLimited } = useRateLimit();
 
   // AQI count-up animation
@@ -206,15 +211,12 @@ export function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* What to do — AI guidance (PWA parity) */}
-        {pred?.insight ? (
-          <View style={[styles.factCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.factLabel, { color: colors.subtext }]}>{t('home.advice_title')}</Text>
-            <Text style={[styles.factBody, { color: colors.text }]}>
-              {cleanGuidanceText(pred.insight)}
-            </Text>
-          </View>
-        ) : null}
+        {/* What to do — personalized advice rules engine (PWA parity) */}
+        <InsightsSection
+          pred={pred}
+          colors={colors}
+          firstName={isAuthenticated ? fullName?.trim().split(' ')[0] || undefined : undefined}
+        />
 
         {/* Rate-limit notice */}
         {isRateLimited ? (
@@ -257,6 +259,14 @@ export function HomeScreen() {
           ))}
         </View>
 
+        {/* What's in your air: PM2.5/PM10/NO2/O3, tap for detail (PWA parity) */}
+        <ContributingFactorsGrid
+          pollutants={pred?.pollutants}
+          isDark={isDark}
+          colors={colors}
+          onSelect={setSelectedPollutant}
+        />
+
         {fact ? (
           <View style={[styles.factCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.factLabel, { color: colors.subtext }]}>{t('home.did_you_know')}</Text>
@@ -265,6 +275,13 @@ export function HomeScreen() {
         ) : null}
 
       </ScrollView>
+
+      <PollutantDetailSheet
+        pollutant={selectedPollutant}
+        isDark={isDark}
+        colors={colors}
+        onClose={() => setSelectedPollutant(null)}
+      />
     </View>
   );
 }
@@ -331,30 +348,29 @@ const styles = StyleSheet.create({
   rateLimitText: { flex: 1, fontSize: 13, fontWeight: '500' },
   heroCardWrap: { paddingHorizontal: 16, marginBottom: 12 },
   heroCard: {
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: 1,
-    padding: 20,
-    minHeight: 160,
+    padding: 14,
     justifyContent: 'space-between',
     position: 'relative',
   },
-  heroChevron: { position: 'absolute', top: 20, right: 16 },
+  heroChevron: { position: 'absolute', top: 14, right: 12 },
   pm25Label: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   statusTitle: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '800',
-    lineHeight: 34,
-    marginTop: 8,
+    lineHeight: 25,
+    marginTop: 4,
   },
-  aqiRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 8, marginBottom: 8 },
-  aqiNumber: { fontSize: 32, fontWeight: '800', lineHeight: 36 },
-  aqiUnit: { fontSize: 14, fontWeight: '600' },
-  locationStamp: { fontSize: 14 },
+  aqiRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 6, marginBottom: 6 },
+  aqiNumber: { fontSize: 24, fontWeight: '800', lineHeight: 28 },
+  aqiUnit: { fontSize: 12, fontWeight: '600' },
+  locationStamp: { fontSize: 12 },
   statRow: {
     flexDirection: 'row',
     paddingHorizontal: 16,

@@ -6,28 +6,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { InputField } from '../../components/ui/InputField';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
-import { OutlineButton } from '../../components/ui/OutlineButton';
 import { MframapaLogo } from '../../components/MframapaLogo';
 import { useTheme } from '../../hooks/useTheme';
 import { getColors, Colors } from '../../theme';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useStore } from '../../store/useStore';
-import { clearSignOutSession } from '../../session/authSession';
 
-interface Props {
-  /** Onboarding flow: flip root navigator into MainApp. */
-  onAuth?: () => void;
-}
-
-export function LoginScreen({ onAuth }: Props) {
+// Only ever reached from Profile > Sign in now (onboarding has no auth step —
+// the app is already usable as a guest by the time anyone sees this screen),
+// so there's no "continue without account" bypass to offer here.
+export function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
   const colors = getColors(isDark);
   const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const signIn = useStore((s) => s.signIn);
-  const enterAsGuest = useStore((s) => s.enterAsGuest);
-  const alreadyInApp = useStore((s) => s.isAuthenticated);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,13 +38,7 @@ export function LoginScreen({ onAuth }: Props) {
       Alert.alert(res.error ?? t('screen.auth.could_not_sign_in'));
       return;
     }
-    if (onAuth) onAuth();
-    else if (navigation.canGoBack()) navigation.goBack();
-  }
-
-  function handleContinueAsGuest() {
-    enterAsGuest();
-    clearSignOutSession();
+    if (navigation.canGoBack()) navigation.goBack();
   }
 
   return (
@@ -96,14 +84,6 @@ export function LoginScreen({ onAuth }: Props) {
 
         <PrimaryButton label={t('screen.auth.sign_in_btn')} onPress={handleLogin} loading={loading} style={styles.cta} />
 
-        {!alreadyInApp ? (
-          <OutlineButton
-            label={t('screen.auth.continue_without_account')}
-            onPress={handleContinueAsGuest}
-            style={styles.guestCta}
-          />
-        ) : null}
-
         <View style={styles.signupRow}>
           <Text style={[styles.signupPrompt, { color: colors.subtext }]}>{t('screen.auth.no_account')}</Text>
           <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
@@ -125,7 +105,6 @@ const styles = StyleSheet.create({
   forgotWrap: { alignSelf: 'flex-end', marginBottom: 24 },
   forgotText: { fontSize: 14, fontWeight: '500' },
   cta: { marginTop: 4 },
-  guestCta: { marginTop: 12 },
   signupRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 24, gap: 6 },
   signupPrompt: { fontSize: 14 },
   signupLink: { fontSize: 14, fontWeight: '600' },

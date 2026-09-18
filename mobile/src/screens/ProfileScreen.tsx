@@ -25,7 +25,9 @@ export function ProfileScreen() {
   const profile = useStore((s) => s.profile);
   const updateProfile = useStore((s) => s.updateProfile);
   const signOut = useStore((s) => s.signOut);
-  // Guests also set isAuthenticated to enter MainApp; a real account has email.
+  // isAuthenticated is real-sign-in-only now (guest use no longer fakes it —
+  // see useStore.ts hasCompletedOnboarding); email presence is still the
+  // simplest signal that this profile came from a real account.
   const hasAccount = Boolean(profile.email?.trim());
 
   const [pickerVisible, setPickerVisible] = useState(false);
