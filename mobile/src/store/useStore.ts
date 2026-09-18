@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { detectDeviceLanguage } from '../utils/constants';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { markSignOutThisSession } from '../session/authSession';
 import { fetchPredictionAtCoords } from '../services/prediction';
 import {
   signInWithPassword,
@@ -32,6 +31,35 @@ function makeActivity(
   };
 }
 
+// Mirrors backend/config/pollutants.py's pollutants[] shape — same field
+// names as the raw API response, no reshaping, so PWA and mobile read
+// identical JSON (frontend-pwa/src/features/home/components/PollutantCard.jsx).
+export interface PollutantReading {
+  code: 'pm25' | 'pm10' | 'no2' | 'o3' | 'so2' | 'co';
+  name: string;
+  short_name: string;
+  value: number | null;
+  unit: string;
+  who_limit: number;
+  who_limit_period: string;
+  pct_of_limit: number | null;
+  severity: 'good' | 'moderate' | 'high' | 'severe' | 'hazardous' | 'unknown';
+  source: string;
+  stale: boolean;
+  updated_at: string | null;
+  cigarette_equivalent?: number | null;
+}
+
+// Mirrors backend/config/personalized_advice.py's AdviceItem shape exactly —
+// same field names as the raw API response.
+export interface AdviceItem {
+  id: string;
+  icon: string;
+  text: string;
+  detail: string | null;
+  priority: number;
+}
+
 export interface PredictionResult {
   pm25: number;
   aqi_category: string;
@@ -44,6 +72,9 @@ export interface PredictionResult {
   degraded?: boolean;
   insight?: string;
   timestamp?: string;
+  pollutants?: PollutantReading[];
+  personalized?: { category: string; reason: string } | null;
+  personalizedAdvice?: AdviceItem[];
 }
 
 export interface SavedLocation {
@@ -119,6 +150,12 @@ export interface UserProfile {
   tier: 'free' | 'researcher' | 'institutional';
   initials: string;
   avatarSeed: string;
+  // Health profile (Workstream 3 personalization): optional, edited from
+  // Profile > Health profile. Synced to the backend
+  // (GET/PUT/DELETE /api/v1/health-profile) only while signed in — a
+  // guest's answers live here locally until they sign in, then get pushed
+  // up once. Mirrors frontend-pwa's appState.jsx profile shape.
+  healthConditions: string[];
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -142,10 +179,15 @@ interface AppState {
   language: string;
   setLanguage: (lang: string) => void;
 
-  // Auth
+  // Onboarding — separate from auth: the app is fully usable as a guest, and
+  // this flag (not isAuthenticated) is what the root navigator gates on, so
+  // sign-in is never a blocker to opening the app. Set once, first run only.
+  hasCompletedOnboarding: boolean;
+  completeOnboarding: () => void;
+
+  // Auth — real signed-in state only. Never faked for guest use (see above).
   isAuthenticated: boolean;
   setAuthenticated: (v: boolean) => void;
-  enterAsGuest: () => void;
   signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signUp: (
     email: string,
@@ -326,24 +368,11 @@ export const useStore = create<AppState>()(
         set({ language: lang });
       },
 
+      hasCompletedOnboarding: false,
+      completeOnboarding: () => set({ hasCompletedOnboarding: true }),
+
       isAuthenticated: false,
       setAuthenticated: (v) => set({ isAuthenticated: v }),
-
-      enterAsGuest: () => {
-        // Drop any leftover session tokens so guest mode is truly anonymous.
-        void signOutSupabase();
-        set({
-          isAuthenticated: true,
-          profile: {
-            fullName: 'Guest',
-            email: '',
-            organization: '',
-            tier: 'free',
-            initials: 'G',
-            avatarSeed: '',
-          },
-        });
-      },
 
       signIn: async (email, password) => {
         const cleanEmail = email.trim().toLowerCase();
@@ -370,6 +399,22 @@ export const useStore = create<AppState>()(
           activityFeed: [makeActivity('activity.signed_in', 'lock'), ...s.activityFeed].slice(0, 50),
         }));
         void import('../services/api').then((m) => m.requestWelcomeEmail()).catch(() => undefined);
+        // Reconcile the health profile now that there's an account to save
+        // it to: an existing server-side profile wins (returning user, new
+        // device); a guest's locally-answered profile gets pushed up for
+        // the first time. Mirrors frontend-pwa's AuthScreen.jsx handleAuth.
+        void import('../services/api').then(async (m) => {
+          try {
+            const server = await m.getHealthProfile();
+            if (server?.health_conditions?.length) {
+              get().setProfile({ healthConditions: server.health_conditions });
+            } else if (get().profile.healthConditions?.length) {
+              await m.updateHealthProfile({ healthConditions: get().profile.healthConditions });
+            }
+          } catch {
+            /* offline, or nothing to reconcile — fine, keep local */
+          }
+        }).catch(() => undefined);
         return { ok: true };
       },
 
@@ -392,17 +437,26 @@ export const useStore = create<AppState>()(
           activityFeed: [makeActivity('activity.account_created', 'person'), ...s.activityFeed].slice(0, 50),
         }));
         void import('../services/api').then((m) => m.requestWelcomeEmail()).catch(() => undefined);
+        // A brand-new account has nothing server-side yet, but push up
+        // whatever the guest already answered before signing up.
+        if (get().profile.healthConditions?.length) {
+          void import('../services/api')
+            .then((m) => m.updateHealthProfile({ healthConditions: get().profile.healthConditions }))
+            .catch(() => undefined);
+        }
         return { ok: true };
       },
 
       signOut: async () => {
         await signOutSupabase();
-        // Mark that this session has signed out so the next mount of the
-        // onboarding stack lands directly on the auth screen instead of the
-        // intro slides.
-        markSignOutThisSession();
+        // Drops back to guest use of MainApp, not back into onboarding —
+        // hasCompletedOnboarding is untouched, same as the PWA. profile is
+        // reset to a blank guest shape — leaving the signed-out account's
+        // name/email/avatar in place made sign-out look like it hadn't
+        // worked, since the app kept greeting the previous user by name.
         set((s) => ({
           isAuthenticated: false,
+          profile: { fullName: '', email: '', organization: '', tier: 'free', initials: 'YA', avatarSeed: '', healthConditions: [] },
           activityFeed: [makeActivity('activity.signed_out', 'lock'), ...s.activityFeed].slice(0, 50),
         }));
       },
@@ -414,6 +468,7 @@ export const useStore = create<AppState>()(
         tier: 'free',
         initials: 'YA',
         avatarSeed: '',
+        healthConditions: [],
       },
       setProfile: (p) =>
         set((state) => {
@@ -666,7 +721,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'mframapa-persist',
-      version: 7,
+      version: 8,
       storage: createJSONStorage(() => AsyncStorage),
       migrate: (persistedState, version) => {
         const state = (persistedState ?? {}) as Partial<AppState> & { isDark?: boolean };
@@ -674,16 +729,30 @@ export const useStore = create<AppState>()(
           .filter((n) => !isSampleNotification(n));
         const activityFeed = (state.activityFeed?.map(migrateActivityItem) ?? DEFAULT_ACTIVITY_FEED)
           .filter((item) => !isSeededActivityItem(item));
+
+        // Pre-v8, enterAsGuest() faked isAuthenticated:true just to get past
+        // onboarding into MainApp (profile.fullName === 'Guest', no email).
+        // That's not a real signed-in session — correct it so ProfileScreen
+        // (already keyed off profile.email, not isAuthenticated) and any
+        // future isAuthenticated-gated code see a true guest, not "signed in".
+        const wasGuestFakedAuth =
+          version < 8 && Boolean(state.isAuthenticated) && !state.profile?.email?.trim();
+
         return {
           ...state,
           themeMode: state.themeMode ?? (state.isDark ? 'dark' : 'system'),
           notifications,
           activityFeed,
+          // anyone who was already past onboarding (real or guest-faked auth)
+          // must not be sent back through it after this update.
+          hasCompletedOnboarding: state.hasCompletedOnboarding ?? Boolean(state.isAuthenticated),
+          isAuthenticated: wasGuestFakedAuth ? false : (state.isAuthenticated ?? false),
         };
       },
       partialize: (state) => ({
         themeMode: state.themeMode,
         language: state.language,
+        hasCompletedOnboarding: state.hasCompletedOnboarding,
         isAuthenticated: state.isAuthenticated,
         profile: state.profile,
         lastPrediction: state.lastPrediction,

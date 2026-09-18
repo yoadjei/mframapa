@@ -75,3 +75,81 @@ export function aqiCategoryFromPm25(pm25: number): string {
 export function aqiSymbol(category: string): string {
   return { good: '●', moderate: '◐', sensitive: '◑', unhealthy: '◕', hazardous: '■' }[aqiBand(category)];
 }
+
+// Severity tiers returned by the backend's pollutants[] (backend/config/pollutants.py)
+// map onto the same checked AQI bands/colours above — one palette, not a second
+// system. Mirrors frontend-pwa/src/utils/colors.js exactly.
+type PollutantSeverity = 'good' | 'moderate' | 'high' | 'severe' | 'hazardous' | 'unknown';
+type Band = 'good' | 'moderate' | 'sensitive' | 'unhealthy' | 'hazardous';
+
+const POLLUTANT_SEVERITY_TO_BAND: Record<PollutantSeverity, Band> = {
+  good: 'good',
+  moderate: 'moderate',
+  high: 'sensitive',
+  severe: 'unhealthy',
+  hazardous: 'hazardous',
+  unknown: 'moderate',
+};
+
+export function pollutantSeverityColor(severity: string, isDark = true): string {
+  const band = POLLUTANT_SEVERITY_TO_BAND[severity as PollutantSeverity] ?? 'moderate';
+  return (isDark ? AQI_DARK : AQI_LIGHT)[band];
+}
+
+const BAND_SYMBOLS: Record<Band, string> = {
+  good: '●', moderate: '◐', sensitive: '◑', unhealthy: '◕', hazardous: '■',
+};
+
+export function pollutantSeveritySymbol(severity: string): string {
+  const band = POLLUTANT_SEVERITY_TO_BAND[severity as PollutantSeverity] ?? 'moderate';
+  return BAND_SYMBOLS[band];
+}
+
+// ── Contributing-factor cards (home screen "What's in your air") ───────────
+// Reuses the same WCAG-checked AQI_DARK/AQI_LIGHT anchors as the rest of the
+// app, interpolated smoothly against these cards' own 0/50/100/200%
+// breakpoints (see mobile/src/config/contributingFactors.ts) instead of the
+// backend's 5-tier severity bands — a deliberately separate scale for this
+// one component. Mirrors frontend-pwa/src/utils/colors.js exactly.
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function mixHex(hexA: string, hexB: string, t: number): string {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  const mix = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return `#${mix.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+const FACTOR_FILL_STOPS = [0, 50, 100, 200];
+
+export function factorFillColor(pct: number | null | undefined, isDark = true): string {
+  const palette = isDark ? AQI_DARK : AQI_LIGHT;
+  const anchors = [palette.good, palette.moderate, palette.sensitive, palette.unhealthy];
+  const p = pct == null ? 0 : Math.max(0, pct);
+  if (p >= FACTOR_FILL_STOPS[FACTOR_FILL_STOPS.length - 1]) return anchors[anchors.length - 1];
+  for (let i = 0; i < FACTOR_FILL_STOPS.length - 1; i++) {
+    if (p >= FACTOR_FILL_STOPS[i] && p <= FACTOR_FILL_STOPS[i + 1]) {
+      const t = (p - FACTOR_FILL_STOPS[i]) / (FACTOR_FILL_STOPS[i + 1] - FACTOR_FILL_STOPS[i]);
+      return mixHex(anchors[i], anchors[i + 1], t);
+    }
+  }
+  return anchors[0];
+}
+
+export function factorFillRgba(pct: number | null | undefined, isDark: boolean, alpha: number): string {
+  const [r, g, b] = hexToRgb(factorFillColor(pct, isDark));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+export function factorStatusKey(pct: number | null | undefined): string {
+  if (pct == null) return 'factor.status.no_data';
+  const p = Math.max(0, pct);
+  if (p < 50) return 'factor.status.safe';
+  if (p < 100) return 'factor.status.elevated';
+  if (p < 200) return 'factor.status.high';
+  return 'factor.status.dangerous';
+}
