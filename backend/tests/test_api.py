@@ -69,6 +69,51 @@ def test_predict_returns_uncertainty(client):
         app.dependency_overrides.clear()
 
 
+def test_predict_returns_pollutants_array(client):
+    mock_pipeline = MagicMock()
+    mock_pipeline.get_features.return_value = {
+        "pm25_surface": 40.0,
+        "pm10_surface": 60.0,
+        "no2_surface": 30.0,
+        "o3_surface": 120.0,
+        "so2_surface": 10.0,
+        "co_surface": 500.0,
+        "temperature_2m": 30.0,
+    }
+    app.dependency_overrides[get_feature_pipeline] = lambda: mock_pipeline
+    try:
+        r = client.get(
+            "/api/v1/predict",
+            params={"lat": 5.6, "lon": -0.19, "name": "Accra", "day": "2024-06-01"},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        pollutants = data["pollutants"]
+        codes = {p["code"] for p in pollutants}
+        assert codes == {"pm25", "pm10", "no2", "o3", "so2", "co"}
+        # sorted most-dangerous-first
+        pcts = [p["pct_of_limit"] for p in pollutants]
+        assert pcts == sorted(pcts, reverse=True)
+        for p in pollutants:
+            assert p["severity"] in ("good", "moderate", "high", "severe", "hazardous", "unknown")
+            assert "who_limit" in p and "unit" in p
+        pm25_entry = next(p for p in pollutants if p["code"] == "pm25")
+        assert pm25_entry["cigarette_equivalent"] is not None
+        assert "comparison" in data  # present (may be None without a warm week-avg cache)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_pollutant_info_route(client):
+    r = client.get("/api/v1/pollutant-info")
+    assert r.status_code == 200
+    data = r.json()["pollutants"]
+    for code in ("pm25", "pm10", "no2", "o3", "so2", "co"):
+        assert code in data
+        assert data[code]["what_it_is"]
+        assert data[code]["citations"]
+
+
 def test_generate_insight(client):
     r = client.post(
         "/api/v1/generate-insight",
