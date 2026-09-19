@@ -23,7 +23,12 @@ logger = logging.getLogger(__name__)
 _STATS_URL = "https://api.worldpop.org/v1/services/stats"
 _DATASET   = "wpgppop"   # population count mosaic; the old 'wpgp' alias 422s
 _YEAR      = "2020"
-_TIMEOUT   = 60
+# The sync endpoint normally answers in ~2s (see module docstring). This used
+# to be 60s, which meant a WorldPop outage held the whole /predict request
+# open until the client's own timeout fired first (mobile axios: 45s) and the
+# user saw a generic "failed to fetch" error instead of a fast degraded
+# response. 10s gives real slowness room without blocking past client timeouts.
+_TIMEOUT   = 10
 _DELTA     = 0.01        # ~1.1 km half-box around the point
 
 

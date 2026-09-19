@@ -102,6 +102,24 @@ _FALLBACK_PLAN: Dict[str, list] = {
     "dust_surface": [
         ("OpenMeteo", "dust_surface"),
     ],
+    # ── Surface-level gas concentrations (display only) ─────────────────────
+    # These feed the multi-pollutant cards, which compare against WHO's
+    # surface-concentration guidelines. They are deliberately kept separate
+    # from no2_tropospheric_column / so2_total_column / co_total_column above,
+    # which are satellite COLUMN densities used as ML model inputs and are not
+    # in the same unit as a WHO surface guideline.
+    "no2_surface": [
+        ("OpenMeteo", "no2_surface"),
+    ],
+    "so2_surface": [
+        ("OpenMeteo", "so2_surface"),
+    ],
+    "co_surface": [
+        ("OpenMeteo", "co_surface"),
+    ],
+    "o3_surface": [
+        ("OpenMeteo", "o3_surface"),
+    ],
 }
 
 _SOURCE_NAMES = [
