@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+import threading
 from datetime import date as dt_date, timedelta
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
@@ -20,6 +21,8 @@ from backend.api import mock_aq
 from backend.api.facts import fact_for
 from backend.api.insights import DRY, season_for, variants
 from backend.api import supabase_admin
+from backend.api import profile_store
+from backend.api import saved_locations_store
 from backend.feedback.store import FeedbackStore
 from backend.api.security import (
     _client_ip,
@@ -29,6 +32,9 @@ from backend.api.security import (
     require_institutional,
 )
 from backend.cache.redis_cache import RedisCache
+from backend.config.pollutants import POLLUTANT_INFO, tightened_category
+from backend.config.personalized_advice import personalized_advice
+from backend.pipeline.pollutant_display import build_pollutants
 from backend.services import gemini_client
 from backend.ml.inference import rectify_prediction, select_bundle
 from backend.pipeline.feature_pipeline import FeaturePipeline
@@ -276,9 +282,11 @@ def _build_prediction(
 
     uncertainty_method = "split_conformal_manifest" if manifest_hw is not None else "heuristic_relative"
 
+    pm25_rounded = round(pm25, 2)
     return {
-        "pm25": round(pm25, 2),
+        "pm25": pm25_rounded,
         "aqi_category": cat,
+        "pollutants": build_pollutants(feats, pm25_rounded, pm25_ml is None, source, lat, lon),
         "factors": _factors_from_features(feats),
         "weather": _weather_from_features(feats),
         "uncertainty": {
@@ -332,6 +340,8 @@ def compute_prediction(
     name: str,
     day: Optional[str],
     pipeline: FeaturePipeline,
+    include_comparison: bool = False,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """assemble features, run inference, and build the §2 response dict."""
     d = day or dt_date.today().isoformat()
@@ -370,10 +380,41 @@ def compute_prediction(
     pm25, half, degraded, source, method = _run_inference(request, feats, region_id, segment, om_pm25)
     pm25 = round(pm25, 2)
 
+    comparison = None
+    if include_comparison:
+        try:
+            comparison = _weekly_comparison(request, lat, lon, pm25, d, pipeline)
+        except Exception as e:
+            logger.warning("compute_prediction: weekly comparison failed — %s", e)
+
+    cat = aqi_category_from_pm25(pm25)
+    pollutants = build_pollutants(feats, pm25, degraded, source, lat, lon)
+
+    personalized = None
+    health_conditions: Optional[list] = None
+    if user_id:
+        try:
+            profile = profile_store.get_profile(user_id)
+            if profile:
+                health_conditions = profile.get("health_conditions")
+                personalized = tightened_category(cat, health_conditions)
+        except Exception as e:
+            logger.warning("compute_prediction: personalization lookup failed — %s", e)
+
+    # Guests and signed-in users with no sensitizing condition both fall
+    # through to GENERAL_RULES inside personalized_advice() — "general
+    # public" advice, never an empty list, per the product brief.
+    pollutant_pcts = {p["code"]: p["pct_of_limit"] for p in pollutants}
+    advice = personalized_advice(health_conditions, pollutant_pcts)
+
     return {
         "pm25": pm25,
-        "aqi_category": aqi_category_from_pm25(pm25),
+        "aqi_category": cat,
         "degraded": degraded,
+        "pollutants": pollutants,
+        "comparison": comparison,
+        "personalized": personalized,
+        "personalized_advice": advice,
         "factors": _factors_from_features(feats),
         "weather": _weather_from_features(feats),
         "uncertainty": {
@@ -387,6 +428,77 @@ def compute_prediction(
         "model": {"region_id": region_id, "segment": segment, "version": "2.0.0", "source": source},
     }
 
+_COMPARISON_DAYS = 7
+_COMPARISON_TTL = 6 * 3600  # matches _HISTORY_TTL — same archive-stability reasoning
+_comparison_inflight: set = set()
+_comparison_inflight_lock = threading.Lock()
+
+
+def _fill_weekly_comparison_cache(
+    request: Request, lat: float, lon: float, day: str, pipeline: FeaturePipeline, cache_key: str
+) -> None:
+    """Background fill for the 7-day average (see _weekly_comparison). Runs off
+    the request thread — each of the 7 reconstructions can itself be slow
+    against live satellite/reanalysis APIs, and nothing here should add that
+    latency to a user's /predict call."""
+    cache = RedisCache()
+    try:
+        base = dt_date.fromisoformat(day)
+        values: List[float] = []
+        for offset in range(1, _COMPARISON_DAYS + 1):
+            target = (base - timedelta(days=offset)).isoformat()
+            try:
+                prior = compute_prediction(request, lat, lon, "Unknown", target, pipeline)
+                values.append(prior["pm25"])
+            except Exception as e:
+                logger.warning("weekly comparison background fill: day=%s failed — %s", target, e)
+        if values:
+            avg = round(sum(values) / len(values), 2)
+            cache.set(cache_key, {"avg": avg}, _COMPARISON_TTL)
+    finally:
+        with _comparison_inflight_lock:
+            _comparison_inflight.discard(cache_key)
+
+
+def _weekly_comparison(
+    request: Request, lat: float, lon: float, pm25: float, day: str, pipeline: FeaturePipeline
+) -> Optional[Dict[str, Any]]:
+    """This location's pm2.5 vs. its own average over the 7 days before `day`.
+
+    Cached per grid cell (6h) and shared across everyone asking about that
+    cell. On a cold cache, the 7 reconstructions are filled in a background
+    thread rather than inline — reconstructing 7 days synchronously on every
+    /predict call would multiply the endpoint's latency by up to 8x against
+    the live data sources, which the brief's "patchy connections" requirement
+    rules out. The caller (this request) gets no comparison the first time;
+    the next request against this cell within the TTL gets a cache hit.
+    Never called from history()/forecast()/map_summary(), which already loop
+    compute_prediction themselves — this stays opt-in (include_comparison=True).
+    """
+    cache = RedisCache()
+    cache_key = f"avg7:{lat:.2f}:{lon:.2f}:{day}"
+    hit = cache.get(cache_key)
+    week_avg = hit.get("avg") if hit else None
+
+    if week_avg is None:
+        with _comparison_inflight_lock:
+            already_filling = cache_key in _comparison_inflight
+            if not already_filling:
+                _comparison_inflight.add(cache_key)
+        if not already_filling:
+            threading.Thread(
+                target=_fill_weekly_comparison_cache,
+                args=(request, lat, lon, day, pipeline, cache_key),
+                daemon=True,
+            ).start()
+        return None
+
+    if not week_avg:
+        return None
+    pct_vs_week_avg = round(((pm25 - week_avg) / week_avg) * 100.0, 1)
+    return {"week_avg_pm25": week_avg, "pct_vs_week_avg": pct_vs_week_avg}
+
+
 @router.get("/predict")
 def predict(
     request: Request,
@@ -395,8 +507,11 @@ def predict(
     name: str = Query("Unknown"),
     day: Optional[str] = Query(None, description="ISO date YYYY-MM-DD (default: today)"),
     pipeline: FeaturePipeline = Depends(get_feature_pipeline),
+    user_id: Optional[str] = Depends(current_user_id),
 ) -> Dict[str, Any]:
-    return compute_prediction(request, lat, lon, name, day, pipeline)
+    return compute_prediction(
+        request, lat, lon, name, day, pipeline, include_comparison=True, user_id=user_id
+    )
 
 
 @router.get("/forecast")
@@ -582,6 +697,86 @@ def build_map_summary(request, pipeline: FeaturePipeline) -> Dict[str, Any]:
     return payload
 
 
+class HealthProfileBody(BaseModel):
+    home_location: Optional[Dict[str, Any]] = None
+    work_location: Optional[Dict[str, Any]] = None
+    health_conditions: List[str] = Field(default_factory=list)
+    routine: Optional[Dict[str, Any]] = None
+
+
+@router.get("/health-profile")
+def get_health_profile(user_id: Optional[str] = Depends(current_user_id)) -> Dict[str, Any]:
+    """The signed-in user's onboarding health profile, or an empty shell for a
+    signed-in user who hasn't set one yet. 401 for anonymous callers — this is
+    sensitive personal data, never guessable from a device fingerprint."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in to view your health profile")
+    profile = profile_store.get_profile(user_id) or {}
+    return {
+        "home_location": profile.get("home_location"),
+        "work_location": profile.get("work_location"),
+        "health_conditions": profile.get("health_conditions") or [],
+        "routine": profile.get("routine"),
+    }
+
+
+@router.put("/health-profile")
+def put_health_profile(
+    body: HealthProfileBody, user_id: Optional[str] = Depends(current_user_id)
+) -> Dict[str, Any]:
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in to save your health profile")
+    saved = profile_store.upsert_profile(user_id, body.model_dump())
+    if saved is None:
+        raise HTTPException(status_code=502, detail="Could not save your health profile")
+    return {"status": "saved"}
+
+
+@router.delete("/health-profile")
+def delete_health_profile(user_id: Optional[str] = Depends(current_user_id)) -> Dict[str, str]:
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in to delete your health profile")
+    profile_store.delete_profile(user_id)
+    return {"status": "deleted"}
+
+
+class SavedLocationBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+    country: Optional[str] = None
+
+
+@router.get("/saved-locations")
+def list_saved_locations(user_id: Optional[str] = Depends(current_user_id)) -> Dict[str, Any]:
+    """Account-level sync on top of the PWA's already-working local saved-
+    locations feature (savedCities in appState.jsx) — guests keep using that
+    unchanged; this only follows a signed-in user to a new device."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in to sync saved locations")
+    return {"locations": saved_locations_store.list_locations(user_id)}
+
+
+@router.post("/saved-locations")
+def add_saved_location(
+    body: SavedLocationBody, user_id: Optional[str] = Depends(current_user_id)
+) -> Dict[str, str]:
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in to save locations")
+    ok = saved_locations_store.save_location(user_id, body.name, body.lat, body.lon, body.country)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Could not save this location")
+    return {"status": "saved"}
+
+
+@router.delete("/saved-locations/{name}")
+def remove_saved_location(name: str, user_id: Optional[str] = Depends(current_user_id)) -> Dict[str, str]:
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in to manage saved locations")
+    saved_locations_store.delete_location(user_id, name)
+    return {"status": "deleted"}
+
+
 @router.delete("/account")
 def delete_account(user_id: Optional[str] = Depends(current_user_id)) -> Dict[str, str]:
     """permanently delete the caller's account.
@@ -590,6 +785,8 @@ def delete_account(user_id: Optional[str] = Depends(current_user_id)) -> Dict[st
     previously faked it. this removes the supabase user, which is where the
     email, the chosen home city and the tier live. push tokens are keyed by
     device and location rather than by user, so they expire on their own.
+    the health_profiles row (docs/db/health_profiles.sql) is FK'd to this user
+    with ON DELETE CASCADE, so it's removed by postgres, not this handler.
     """
     if not user_id:
         raise HTTPException(status_code=401, detail="Sign in to delete your account")
@@ -726,6 +923,17 @@ def daily_fact(
             logger.warning("fact translation failed, serving english: %s", exc)
 
     return {"fact": text}
+
+
+@router.get("/pollutant-info")
+def pollutant_info() -> Dict[str, Any]:
+    """Static per-pollutant health copy (what it is, sources, effects, actions).
+
+    Served separately from /predict so the numeric payload the client refreshes
+    constantly stays light — this only changes when we ship new copy, so the
+    client fetches it once and caches it (see frontend-pwa's CacheFirst rule).
+    """
+    return {"pollutants": POLLUTANT_INFO}
 
 
 @router.get("/map-summary")
@@ -957,6 +1165,10 @@ class PushTokenBody(BaseModel):
     platform: str = Field(..., pattern="^(android|ios|web)$")
     lat: Optional[float] = None
     lon: Optional[float] = None
+    # negative = alert earlier than the default AQI threshold (a sensitized
+    # profile). schema + registration only for now — episode_detector.py does
+    # not yet consult this when deciding whether to send an alert.
+    threshold_offset: Optional[float] = None
 
 
 def get_push_store():
@@ -964,12 +1176,17 @@ def get_push_store():
     return _default()
 
 # alerts are the product and are never paywalled for individuals (scope §5, §3.2),
-# so a device can register for alerts without an account.
+# so a device can register for alerts without an account — signing in only adds
+# a user_id + optional personal threshold on top of that, it never gates it.
 @router.post("/register-push-token", status_code=200)
-def register_push_token(body: PushTokenBody, store=Depends(get_push_store)) -> Dict[str, str]:
+def register_push_token(
+    body: PushTokenBody,
+    store=Depends(get_push_store),
+    user_id: Optional[str] = Depends(current_user_id),
+) -> Dict[str, str]:
     """Register an Expo/Web Push token for AQI alert delivery using the configured store."""
     try:
-        store.register(body.token, body.platform, body.lat, body.lon)
+        store.register(body.token, body.platform, body.lat, body.lon, user_id, body.threshold_offset)
     except Exception as exc:
         # telling the device it is registered when the token was not persisted is
         # worse than failing: the user believes alerts are on and never hears from
