@@ -5,6 +5,7 @@ import { useTranslation } from "../../hooks/useTranslation.js";
 import { getColors, Colors, getAQIColor } from "../../utils/colors.js";
 import { StackBackButton } from "../../components/navigation/StackBackButton.jsx";
 import { useStackChrome, stackTopPad } from "../../hooks/useStackChrome.js";
+import { removeLocationRemote } from "../../services/api.js";
 
 export function SavedLocationsScreen({ isDark }) {
   const { state, dispatch } = useAppState();
@@ -18,6 +19,7 @@ export function SavedLocationsScreen({ isDark }) {
 
   function handleDelete(name) {
     dispatch({ type: "REMOVE_CITY", payload: name });
+    if (state.session?.authenticated) removeLocationRemote(name);
   }
 
   function handleAdd() {

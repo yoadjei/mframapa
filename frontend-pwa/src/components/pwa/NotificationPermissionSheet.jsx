@@ -52,7 +52,11 @@ export function NotificationPermissionSheet({ open, onClose, isDark = true }) {
       }
       const lat = state.homeSummary?.lat ?? state.ui?.selectedCity?.lat;
       const lon = state.homeSummary?.lon ?? state.ui?.selectedCity?.lon;
-      const result = await subscribeWebPush({ lat, lon });
+      // a sensitized health profile asks to be alerted sooner — schema/
+      // registration only for now (see register_push_token in router.py);
+      // the alert job doesn't consult this yet.
+      const thresholdOffset = (state.profile?.healthConditions ?? []).length > 0 ? -15 : null;
+      const result = await subscribeWebPush({ lat, lon, thresholdOffset });
       if (result?.ok) {
         dispatch({
           type: "UPDATE_PREFERENCES",

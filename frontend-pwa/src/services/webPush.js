@@ -23,7 +23,7 @@ export async function fetchVapidPublicKey() {
   }
 }
 
-export async function subscribeWebPush({ lat, lon } = {}) {
+export async function subscribeWebPush({ lat, lon, thresholdOffset } = {}) {
   if (typeof window === "undefined") return { ok: false, reason: "ssr" };
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     return { ok: false, reason: "unsupported" };
@@ -54,6 +54,7 @@ export async function subscribeWebPush({ lat, lon } = {}) {
     platform: "web",
     lat: lat ?? null,
     lon: lon ?? null,
+    threshold_offset: thresholdOffset ?? null,
   });
 
   return { ok: true, subscription: sub };
