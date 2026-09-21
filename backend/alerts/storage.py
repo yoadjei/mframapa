@@ -36,6 +36,20 @@ class PushTokenStore:
                 )
                 """
             )
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        # user_id + threshold_offset: schema for personal alert thresholds
+        # (workstream 3). Nullable — a device can still register anonymously,
+        # same as today. Consulting threshold_offset when deciding whether to
+        # send an alert is not implemented yet (see backend/alerts/episode_detector.py);
+        # this only carries the value so registration doesn't need a second migration later.
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(push_tokens)")}
+        if "user_id" not in existing:
+            conn.execute("ALTER TABLE push_tokens ADD COLUMN user_id TEXT")
+        if "threshold_offset" not in existing:
+            conn.execute("ALTER TABLE push_tokens ADD COLUMN threshold_offset REAL")
 
     def register(
         self,
@@ -43,6 +57,8 @@ class PushTokenStore:
         platform: str,
         lat: Optional[float] = None,
         lon: Optional[float] = None,
+        user_id: Optional[str] = None,
+        threshold_offset: Optional[float] = None,
     ) -> None:
         # lat/lon optional for web subscribe-before-locate; daily facts use all(),
         # episode targeting uses near() and simply misses 0,0 placeholders.
@@ -51,13 +67,14 @@ class PushTokenStore:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
-                INSERT INTO push_tokens (token, platform, lat, lon, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO push_tokens (token, platform, lat, lon, updated_at, user_id, threshold_offset)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(token) DO UPDATE SET
                     platform=excluded.platform, lat=excluded.lat,
-                    lon=excluded.lon, updated_at=excluded.updated_at
+                    lon=excluded.lon, updated_at=excluded.updated_at,
+                    user_id=excluded.user_id, threshold_offset=excluded.threshold_offset
                 """,
-                (token, platform, la, lo, time.time()),
+                (token, platform, la, lo, time.time(), user_id, threshold_offset),
             )
 
     def all(self) -> List[Dict[str, Any]]:
