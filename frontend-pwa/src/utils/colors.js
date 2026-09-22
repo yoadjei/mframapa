@@ -55,6 +55,83 @@ export function aqiSymbol(category) {
   }[aqiBand(category)];
 }
 
+/** Severity tiers returned by the backend's pollutants[] (backend/config/pollutants.py)
+ *  map onto the same checked AQI bands/colours above — one palette, not a second system. */
+const POLLUTANT_SEVERITY_TO_BAND = {
+  good: "good",
+  moderate: "moderate",
+  high: "sensitive",
+  severe: "unhealthy",
+  hazardous: "hazardous",
+  unknown: "moderate",
+};
+
+export function pollutantSeverityColor(severity, isDark = true) {
+  const band = POLLUTANT_SEVERITY_TO_BAND[severity] ?? "moderate";
+  return (isDark ? AQI_DARK : AQI_LIGHT)[band];
+}
+
+/** Same shape-per-band language as aqiSymbol(), so a pollutant card reads
+ *  without colour just like the hero AQI badge does. */
+export function pollutantSeveritySymbol(severity) {
+  const band = POLLUTANT_SEVERITY_TO_BAND[severity] ?? "moderate";
+  return { good: "●", moderate: "◐", sensitive: "◑", unhealthy: "◕", hazardous: "■" }[band];
+}
+
+// ── Contributing-factor cards (home screen "What's in your air") ───────────
+// Reuses the same WCAG-checked AQI_DARK/AQI_LIGHT anchor colours as the rest
+// of the app (good/moderate/sensitive/unhealthy) but interpolated smoothly
+// against the cards' own 0/50/100/200% breakpoints (see
+// contributingFactors.config.js) instead of snapped to the backend's 5-tier
+// severity bands — a deliberately separate scale for this one component.
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function mixHex(hexA, hexB, t) {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  const mix = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return `#${mix.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Smooth green→amber→orange→red fill colour for a % of WHO limit. */
+export function factorFillColor(pct, isDark = true) {
+  const palette = isDark ? AQI_DARK : AQI_LIGHT;
+  const anchors = [palette.good, palette.moderate, palette.sensitive, palette.unhealthy];
+  const stops = [0, 50, 100, 200];
+  const p = pct == null ? 0 : Math.max(0, pct);
+  if (p >= stops[stops.length - 1]) return anchors[anchors.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (p >= stops[i] && p <= stops[i + 1]) {
+      const t = (p - stops[i]) / (stops[i + 1] - stops[i]);
+      return mixHex(anchors[i], anchors[i + 1], t);
+    }
+  }
+  return anchors[0];
+}
+
+/** rgba() string for the pulsing glow outline — computed in JS rather than
+ *  via CSS color-mix() so the animation doesn't silently no-op on older
+ *  WebViews that don't support it yet. */
+export function factorFillRgba(pct, isDark, alpha) {
+  const [r, g, b] = hexToRgb(factorFillColor(pct, isDark));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** Status word for a factor card — readable without colour, per the same
+ *  0/50/100/200% breakpoints as factorFillColor(). */
+export function factorStatusKey(pct) {
+  if (pct == null) return "factor.status.no_data";
+  const p = Math.max(0, pct);
+  if (p < 50) return "factor.status.safe";
+  if (p < 100) return "factor.status.elevated";
+  if (p < 200) return "factor.status.high";
+  return "factor.status.dangerous";
+}
+
 /** Resolve dark/light from preference + OS (single source of truth). */
 export function resolveIsDark(theme = "system") {
   if (theme === "dark") return true;

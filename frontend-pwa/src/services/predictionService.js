@@ -81,6 +81,10 @@ async function buildPrediction(city, response, language) {
     factors: response.factors ?? null,
     uncertainty: response.uncertainty ?? null,
     model: response.model ?? null,
+    pollutants: response.pollutants ?? [],
+    comparison: response.comparison ?? null,
+    personalized: response.personalized ?? null,
+    personalizedAdvice: response.personalized_advice ?? [],
     insight,
   };
 }

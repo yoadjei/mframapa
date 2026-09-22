@@ -158,6 +158,81 @@ export async function getDailyFact(language = "en", languageName = "") {
   }
 }
 
+// static per-pollutant health copy. changes only when we ship new copy, so
+// fetched once per session and cached in memory rather than on every predict.
+let pollutantInfoCache = null;
+
+export async function getPollutantInfo() {
+  if (pollutantInfoCache) return pollutantInfoCache;
+  try {
+    const response = await httpClient.get("/api/v1/pollutant-info");
+    pollutantInfoCache = response.data?.pollutants ?? {};
+    return pollutantInfoCache;
+  } catch {
+    return {};                       // detail sheet degrades to numbers-only
+  }
+}
+
+/** the signed-in user's onboarding health profile (conditions, locations, routine). */
+export async function getHealthProfile() {
+  try {
+    const response = await httpClient.get("/api/v1/health-profile");
+    return response.data;
+  } catch (error) {
+    throw new Error(normalizeError(error, "Could not load your health profile"));
+  }
+}
+
+export async function updateHealthProfile({ homeLocation, workLocation, healthConditions, routine }) {
+  try {
+    await httpClient.put("/api/v1/health-profile", {
+      home_location: homeLocation ?? null,
+      work_location: workLocation ?? null,
+      health_conditions: healthConditions ?? [],
+      routine: routine ?? null,
+    });
+  } catch (error) {
+    throw new Error(normalizeError(error, "Could not save your health profile"));
+  }
+}
+
+/** permanently delete the signed-in user's saved health profile (not the account). */
+export async function deleteHealthProfile() {
+  try {
+    await httpClient.delete("/api/v1/health-profile");
+  } catch (error) {
+    throw new Error(normalizeError(error, "Could not delete your health profile"));
+  }
+}
+
+// account-level sync on top of the already-working local saved-locations
+// feature (savedCities in appState.jsx) — best-effort; a signed-in user's
+// local list is always the source of truth for what's on screen.
+export async function listSavedLocationsRemote() {
+  try {
+    const response = await httpClient.get("/api/v1/saved-locations");
+    return response.data?.locations ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveLocationRemote({ name, lat, lon, country }) {
+  try {
+    await httpClient.post("/api/v1/saved-locations", { name, lat, lon, country });
+  } catch {
+    /* local save already happened; remote sync is best-effort */
+  }
+}
+
+export async function removeLocationRemote(name) {
+  try {
+    await httpClient.delete(`/api/v1/saved-locations/${encodeURIComponent(name)}`);
+  } catch {
+    /* local removal already happened; remote sync is best-effort */
+  }
+}
+
 /** permanently delete the signed-in account. irreversible. */
 export async function deleteAccount() {
   try {

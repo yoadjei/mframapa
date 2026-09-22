@@ -63,3 +63,15 @@ class TestERA5DataSource:
         assert "relative_humidity" in features
         assert "u_component_of_wind_10m" in features
         assert "v_component_of_wind_10m" in features
+
+    def test_client_bounds_cdsapi_internal_retry(self):
+        """cdsapi.Client defaults to retry_max=500/sleep_max=120 — its own
+        internal retry loop, which backend.utils.retry.with_retry cannot bound
+        (SIGALRM-based timeouts are a no-op outside the main thread, i.e. in
+        every real FastAPI request/background-thread call). A degraded CDS API
+        must fail in seconds, not silently block a worker thread for hours."""
+        src, mock_cdsapi = _make_era5(cdsapi_available=True)
+        assert src.client is not None
+        _, kwargs = mock_cdsapi.Client.call_args
+        assert kwargs.get("retry_max") == 1
+        assert kwargs.get("timeout") is not None and kwargs["timeout"] <= 60

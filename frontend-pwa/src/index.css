@@ -259,6 +259,20 @@ html[data-theme="light"] .mf-glass,
   .mf-press:active { transform: none; }
 }
 
+/* Subtle pulsing outline on a "What's in your air" card once its factor is
+   over the WHO safe limit — signal, not seizure-trigger: low amplitude,
+   slow (1.8s), and off entirely under reduced motion. */
+@keyframes mf-factor-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--mf-glow-strong); }
+  50%      { box-shadow: 0 0 0 5px var(--mf-glow-weak); }
+}
+.mf-factor-glow {
+  animation: mf-factor-pulse 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mf-factor-glow { animation: none; }
+}
+
 /* Prevent horizontal scroll */
 html, body {
   overflow-x: hidden;

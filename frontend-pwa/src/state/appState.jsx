@@ -21,6 +21,14 @@ const initialState = {
     email: "",
     organization: "",
     avatar: null,
+    // health profile (onboarding item 2 / workstream 3): optional, edited from
+    // onboarding or Profile > Health profile. Synced to the backend
+    // (GET/PUT/DELETE /api/v1/health-profile) only while signed in — a guest's
+    // answers live here locally until they sign in, then get pushed up once.
+    healthConditions: [],
+    homeLocation: null,   // {name, lat, lon}
+    workLocation: null,
+    routine: null,        // {commuteMinutes, outdoorExercise}
   },
   preferences: {
     theme: "system",
@@ -122,9 +130,14 @@ function appReducer(state, action) {
             : state.homeSummary,
       };
     case "LOGOUT":
+      // profile resets to the blank guest shape too — leaving the signed-out
+      // account's name/email/health conditions in local state made sign-out
+      // look broken, since the app kept greeting the previous user by name
+      // and personalizing "What to do" off their old health profile.
       return {
         ...state,
         session: { authenticated: false, token: null, user: null, tier: "free" },
+        profile: { ...initialState.profile },
         ui: { ...state.ui, activeScreen: "home", screenStack: [] },
       };
     case "UPDATE_TIER":

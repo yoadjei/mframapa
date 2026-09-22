@@ -23,6 +23,7 @@ export type FabMoreItem = {
 /** Full product link list on Profile (same order as PWA ALL_MENU_ITEMS). */
 export const PROFILE_MENU_ITEMS: ProfileMenuItem[] = [
   { id: 'settings', labelKey: 'screen.profile.link_settings', screen: 'Settings' },
+  { id: 'health', labelKey: 'health_profile.title', screen: 'HealthProfile' },
   { id: 'saved', labelKey: 'screen.profile.link_saved_locations', screen: 'SavedLocations' },
   { id: 'activity', labelKey: 'screen.profile.link_activity_feed', screen: 'ActivityFeed' },
   { id: 'ai', labelKey: 'screen.profile.link_ai_insights', screen: 'AIInsights' },

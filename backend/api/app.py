@@ -198,10 +198,17 @@ _DEFAULT_ORIGINS = ",".join(
 _ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", _DEFAULT_ORIGINS).split(",") if o.strip()
 ]
+# Vite auto-increments past 5173/5174 the moment either port is already taken
+# by another dev-server instance (common with several local sessions running
+# at once), silently CORS-blocking every API call from whatever port it lands
+# on instead. Scoped to loopback only — never matches a real domain, so this
+# doesn't widen what's allowed in production.
+_LOCALHOST_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1):\d+$"
 app.add_middleware(TracingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=_LOCALHOST_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

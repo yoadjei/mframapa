@@ -431,7 +431,7 @@ function ForgotView({ onBack , c, isDark }) {
 
 /* ── Root ── */
 export function AuthScreen({ isDark = true, params }) {
-  const { dispatch } = useAppState();
+  const { state, dispatch } = useAppState();
   const c = palette(isDark);
   // Sign In from Profile always lands on login (email + password only).
   // "login" | "signup" | "forgot"
@@ -443,6 +443,51 @@ export function AuthScreen({ isDark = true, params }) {
     dispatch({ type: "LOGIN_SUCCESS", payload });
     // One-time Resend welcome after a real session (signup with session or login).
     import("../../services/api.js").then((m) => m.requestWelcomeEmail()).catch(() => undefined);
+    // Reconcile the health profile now that there's an account to save it to:
+    // an existing server-side profile wins (returning user, new device); a
+    // guest's locally-answered onboarding gets pushed up for the first time.
+    import("../../services/api.js").then(async (m) => {
+      try {
+        const server = await m.getHealthProfile();
+        if (server?.health_conditions?.length) {
+          dispatch({
+            type: "UPDATE_PROFILE",
+            payload: {
+              healthConditions: server.health_conditions,
+              homeLocation: server.home_location,
+              workLocation: server.work_location,
+              routine: server.routine,
+            },
+          });
+        } else if (state.profile.healthConditions?.length) {
+          // guest answered onboarding's health-profile step before signing in —
+          // nothing on the server yet, so push what they already told us.
+          await m.updateHealthProfile({
+            healthConditions: state.profile.healthConditions,
+            homeLocation: state.profile.homeLocation,
+            workLocation: state.profile.workLocation,
+            routine: state.profile.routine,
+          });
+        }
+      } catch {
+        /* offline, or nothing to reconcile — fine, keep local */
+      }
+    }).catch(() => undefined);
+    // merge any saved locations already on the account into the local list —
+    // additive only, never drops a location the device already has saved.
+    import("../../services/api.js").then(async (m) => {
+      try {
+        const remote = await m.listSavedLocationsRemote();
+        for (const loc of remote) {
+          dispatch({
+            type: "SAVE_CITY",
+            payload: { name: loc.name, lat: loc.lat, lon: loc.lon, country: loc.country ?? "" },
+          });
+        }
+      } catch {
+        /* offline, or nothing saved remotely yet */
+      }
+    }).catch(() => undefined);
   }
 
   if (screen === "signup") {

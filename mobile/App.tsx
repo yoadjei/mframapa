@@ -33,7 +33,7 @@ initSentry();   // crash reporting before anything renders
 
 export default function App() {
   const { isDark } = useTheme();
-  const isAuthenticated = useStore((s) => s.isAuthenticated);
+  const hasCompletedOnboarding = useStore((s) => s.hasCompletedOnboarding);
   const offlineCities = useStore((s) => s.offlineCities);
   const setOfflineCities = useStore((s) => s.setOfflineCities);
   const lastPrediction = useStore((s) => s.lastPrediction);
@@ -141,7 +141,7 @@ export default function App() {
 
   // Soft push explainer after the user reaches the main app (never cold OS prompt).
   useEffect(() => {
-    if (!isAuthenticated) return undefined;
+    if (!hasCompletedOnboarding) return undefined;
     let cancelled = false;
     const timer = setTimeout(async () => {
       if (cancelled) return;
@@ -153,7 +153,7 @@ export default function App() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [isAuthenticated]);
+  }, [hasCompletedOnboarding]);
 
   // Prefer boot theme until zustand finishes rehydrate (avoids dark→light flash).
   const resolvedDark = storeHydrated ? isDark : (boot?.isDark ?? true);
@@ -199,7 +199,7 @@ export default function App() {
           <View style={styles.nav}>
             <NavigationContainer
               ref={navigationRef}
-              key={isAuthenticated ? 'main' : 'onboarding'}
+              key={hasCompletedOnboarding ? 'main' : 'onboarding'}
               theme={navTheme}
             >
               <AppNavigator />

@@ -44,10 +44,19 @@ class ERA5DataSource(DataSource):
             import cdsapi
             url = os.environ.get("CDSAPI_URL")
             key = os.environ.get("CDSAPI_KEY")
+            # cdsapi.Client defaults to retry_max=500 / sleep_max=120 — its own
+            # internal retry loop, completely separate from (and not bounded by)
+            # backend.utils.retry.with_retry below. A slow/degraded CDS API can
+            # therefore block a single self.client.retrieve() call for up to
+            # ~500*120s (hours), starving the request thread and never giving
+            # the ERA5→OpenMeteo→NASA-POWER fallback chain a chance to run.
+            # One attempt here, bounded by `timeout` (HTTP read timeout,
+            # seconds) — our own with_retry(max_attempts=3) is the retry layer.
+            client_kwargs = {"quiet": True, "retry_max": 1, "timeout": 30}
             if url and key:
-                self.client = cdsapi.Client(url=url, key=key, quiet=True)
+                self.client = cdsapi.Client(url=url, key=key, **client_kwargs)
             else:
-                self.client = cdsapi.Client(quiet=True)   # falls back to ~/.cdsapirc
+                self.client = cdsapi.Client(**client_kwargs)   # falls back to ~/.cdsapirc
         except ImportError:
             # expected in the lean serving image — openmeteo covers these features.
             logger.debug("ERA5: 'cdsapi' not installed; source disabled")

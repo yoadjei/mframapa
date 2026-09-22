@@ -385,7 +385,12 @@ export function OnboardingScreen({ canInstall, onInstall }) {
   }
 
   // one moving backdrop across all three phases, so first run feels continuous
-  // rather than like three separate screens
+  // rather than like three separate screens.
+  //
+  // Deliberately no sign-in and no health-profile step here: the app is
+  // usable as a guest, and personalization (health profile, tightened
+  // thresholds) is opt-in from Profile once someone chooses to sign in —
+  // never a gate on first open.
   return (
     <>
       <MorphBackground isDark liteMode={liteMode} />

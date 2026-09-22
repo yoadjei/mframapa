@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import type { AuthResponse } from '@supabase/supabase-js';
-import { PredictionResult } from '../store/useStore';
+import { PollutantReading, PredictionResult } from '../store/useStore';
 import { API_BASE_URL, languageName } from '../utils/constants';
 import { factorLabels } from '../utils/factors';
 import { getCurrentSession, getSupabase } from './supabase';
@@ -164,6 +164,9 @@ function mapPrediction(
     modelSource,
     degraded,
     insight,
+    pollutants: data.pollutants as PollutantReading[] | undefined,
+    personalized: data.personalized as { category: string; reason: string } | null | undefined,
+    personalizedAdvice: data.personalized_advice as PredictionResult['personalizedAdvice'],
   };
 }
 
@@ -267,6 +270,30 @@ export async function getMapHistory(days = 14): Promise<MapHistory> {
   return { dates: data?.dates ?? [], cities: data?.cities ?? [] };
 }
 
+export type PollutantInfo = {
+  what_it_is: string;
+  local_sources: string[];
+  body_effects: string;
+  at_risk_groups: string[];
+  actions_by_severity: Record<string, string[]>;
+  citations: string[];
+};
+
+// static per-pollutant health copy. changes only when we ship new copy, so
+// fetched once per app session and cached in memory rather than on every predict.
+let pollutantInfoCache: Record<string, PollutantInfo> | null = null;
+
+export async function getPollutantInfo(): Promise<Record<string, PollutantInfo>> {
+  if (pollutantInfoCache) return pollutantInfoCache;
+  try {
+    const { data } = await client.get('/api/v1/pollutant-info');
+    pollutantInfoCache = (data?.pollutants as Record<string, PollutantInfo>) ?? {};
+    return pollutantInfoCache;
+  } catch {
+    return {};
+  }
+}
+
 // one short reviewed fact a day, the same for everyone, translated server side.
 export async function getDailyFact(language = 'en', languageName = ''): Promise<string> {
   try {
@@ -291,6 +318,40 @@ export async function sendFeedback(body: {
 /** permanently delete the signed-in account. irreversible. */
 export async function deleteAccount(): Promise<void> {
   await client.delete('/api/v1/account');
+}
+
+export interface HealthProfileBody {
+  healthConditions: string[];
+  homeLocation?: unknown;
+  workLocation?: unknown;
+  routine?: unknown;
+}
+
+/** the signed-in user's health profile (conditions, locations, routine). */
+export async function getHealthProfile(): Promise<{
+  health_conditions: string[];
+  home_location: unknown;
+  work_location: unknown;
+  routine: unknown;
+}> {
+  const { data } = await client.get('/api/v1/health-profile');
+  return data;
+}
+
+export async function updateHealthProfile({
+  healthConditions, homeLocation, workLocation, routine,
+}: HealthProfileBody): Promise<void> {
+  await client.put('/api/v1/health-profile', {
+    health_conditions: healthConditions ?? [],
+    home_location: homeLocation ?? null,
+    work_location: workLocation ?? null,
+    routine: routine ?? null,
+  });
+}
+
+/** permanently delete the signed-in user's saved health profile (not the account). */
+export async function deleteHealthProfile(): Promise<void> {
+  await client.delete('/api/v1/health-profile');
 }
 
 /** One-time Welcome email after a real signed-in session. Failures are silent. */

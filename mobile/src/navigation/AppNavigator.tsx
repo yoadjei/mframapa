@@ -5,10 +5,6 @@ import { GlassTabBar } from '../components/navigation/GlassTabBar';
 
 import { useStore } from '../store/useStore';
 import { useTranslation } from '../hooks/useTranslation';
-import {
-  clearSignOutSession,
-  shouldStartOnboardingAtAuth,
-} from '../session/authSession';
 
 // Onboarding
 import { SplashScreen } from '../screens/onboarding/SplashScreen';
@@ -31,6 +27,7 @@ import { HealthRiskScreen } from '../screens/HealthRiskScreen';
 
 // Profile stack screens
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { HealthProfileScreen } from '../screens/HealthProfileScreen';
 import { SavedLocationsScreen } from '../screens/SavedLocationsScreen';
 import { ActivityFeedScreen } from '../screens/ActivityFeedScreen';
 import { AIInsightsScreen } from '../screens/AIInsightsScreen';
@@ -78,6 +75,9 @@ function MapStack() {
     <Stack.Navigator screenOptions={stackScreenOptions}>
       <Stack.Screen name="MapMain" component={MapScreen} />
       <Stack.Screen name="CityDetail" component={CityDetailScreen} />
+      {/* CityDetail's "view health risk breakdown" link needs this here too —
+          CityDetail is reachable from every tab, so HealthRisk must be. */}
+      <Stack.Screen name="HealthRisk" component={HealthRiskScreen} />
     </Stack.Navigator>
   );
 }
@@ -88,6 +88,7 @@ function SearchStack() {
     <Stack.Navigator screenOptions={stackScreenOptions}>
       <Stack.Screen name="SearchMain" component={SearchScreen} />
       <Stack.Screen name="CityDetail" component={CityDetailScreen} />
+      <Stack.Screen name="HealthRisk" component={HealthRiskScreen} />
     </Stack.Navigator>
   );
 }
@@ -111,6 +112,7 @@ function ProfileStack() {
       <Stack.Screen name="SignUp" children={() => <SignUpScreen />} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="HealthProfile" component={HealthProfileScreen} />
       <Stack.Screen name="SavedLocations" component={SavedLocationsScreen} />
       <Stack.Screen name="CityDetail" component={CityDetailScreen} />
       <Stack.Screen name="HealthRisk" component={HealthRiskScreen} />
@@ -170,38 +172,13 @@ function MainApp() {
   );
 }
 
-// ─── Auth Stack (Login → SignUp / ForgotPassword) ────────────────────────────
-// Account is optional — Login offers "Continue without account" (enterAsGuest).
-// Permissions always land here; after sign-out, startAtAuth skips intro slides.
-const AuthStack = createNativeStackNavigator();
-
-function AuthFlow() {
-  const setAuthenticated = useStore((s) => s.setAuthenticated);
-
-  function finishAuth() {
-    setAuthenticated(true);
-    clearSignOutSession();
-  }
-
-  return (
-    <AuthStack.Navigator screenOptions={stackScreenOptions}>
-      <AuthStack.Screen
-        name="Login"
-        children={() => <LoginScreen onAuth={finishAuth} />}
-      />
-      <AuthStack.Screen
-        name="SignUp"
-        children={() => <SignUpScreen onAuth={finishAuth} />}
-      />
-      <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
-    </AuthStack.Navigator>
-  );
-}
-
 // ─── Onboarding Stack ─────────────────────────────────────────────────────────
-function OnboardingNavigator({ startAtAuth = false }: { startAtAuth?: boolean }) {
-  type Phase = 'splash' | 'slides' | 'permissions' | 'auth';
-  const [phase, setPhase] = useState<Phase>(startAtAuth ? 'auth' : 'splash');
+// Deliberately no auth step: the app is usable as a guest, and sign-in /
+// sign-up are optional, reachable only from Profile (see ProfileStack above)
+// — never a gate on first open. Matches frontend-pwa's OnboardingScreen.jsx.
+function OnboardingNavigator({ onDone }: { onDone: () => void }) {
+  type Phase = 'splash' | 'slides' | 'permissions';
+  const [phase, setPhase] = useState<Phase>('splash');
 
   if (phase === 'splash') {
     return <SplashScreen onDone={() => setPhase('slides')} />;
@@ -209,25 +186,16 @@ function OnboardingNavigator({ startAtAuth = false }: { startAtAuth?: boolean })
   if (phase === 'slides') {
     return <OnboardingSlidesScreen onDone={() => setPhase('permissions')} />;
   }
-  if (phase === 'permissions') {
-    return (
-      <PermissionsScreen
-        onAllow={() => setPhase('auth')}
-        onSkip={() => setPhase('auth')}
-      />
-    );
-  }
-  return <AuthFlow />;
+  return <PermissionsScreen onAllow={onDone} onSkip={onDone} />;
 }
 
 // ─── Root Navigator ───────────────────────────────────────────────────────────
 export function AppNavigator() {
-  const isAuthenticated = useStore((s) => s.isAuthenticated);
+  const hasCompletedOnboarding = useStore((s) => s.hasCompletedOnboarding);
+  const completeOnboarding = useStore((s) => s.completeOnboarding);
 
-  if (!isAuthenticated) {
-    return (
-      <OnboardingNavigator startAtAuth={shouldStartOnboardingAtAuth()} />
-    );
+  if (!hasCompletedOnboarding) {
+    return <OnboardingNavigator onDone={completeOnboarding} />;
   }
 
   return (

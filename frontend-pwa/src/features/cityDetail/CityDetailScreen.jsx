@@ -190,10 +190,11 @@ export function CityDetailScreen({ isDark, params }) {
   function handleSave() {
     if (!city || isSaved || saving) return;
     setSaving(true);
+    const name = displayName || cityName;
     dispatch({
       type: "SAVE_CITY",
       payload: {
-        name: displayName || cityName,
+        name,
         lat: city.lat,
         lon: city.lon,
         country: city.country ?? "",
@@ -205,6 +206,11 @@ export function CityDetailScreen({ isDark, params }) {
         }),
       },
     });
+    if (state.session?.authenticated) {
+      import("../../services/api.js").then((m) =>
+        m.saveLocationRemote({ name, lat: city.lat, lon: city.lon, country: city.country ?? "" })
+      );
+    }
     setSaving(false);
   }
 

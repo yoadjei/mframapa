@@ -19,7 +19,9 @@ function localCalendarDate() {
 }
 import { MframapaLogo } from "../../components/brand/MframapaLogo.jsx";
 import { getAQIColor, aqiSymbol, resolveIsDark, getColors } from "../../utils/colors.js";
-import { cleanGuidanceText } from "../../utils/cleanGuidanceText.js";
+import { ContributingFactorsGrid } from "./components/ContributingFactorsGrid.jsx";
+import { PollutantDetailSheet } from "./components/PollutantDetailSheet.jsx";
+import { InsightsSection } from "./components/InsightsSection.jsx";
 
 // ── AQI helpers ───────────────────────────────────────────────────────────────
 
@@ -67,6 +69,7 @@ export function HomeScreen({ isOnline, isDark: isDarkProp }) {
   const [locating, setLocating]   = useState(false);
   const [error, setError]         = useState(null);
   const [prediction, setPrediction] = useState(null);
+  const [selectedPollutant, setSelectedPollutant] = useState(null);
 
   const displayNum = useCountUp(prediction?.pm25 ?? null);
 
@@ -314,7 +317,7 @@ export function HomeScreen({ isOnline, isDark: isDarkProp }) {
               };
               navigate("cityDetail", { prediction: pred, city });
             }}
-            className="mf-press relative w-full rounded-[20px] border p-5 text-left"
+            className="mf-press relative w-full rounded-2xl border p-3.5 text-left"
             aria-label={
               pred
                 ? t("a11y.reading_summary", {
@@ -327,45 +330,44 @@ export function HomeScreen({ isOnline, isDark: isDarkProp }) {
             style={{
               backgroundColor: pred ? aqiColor + (isDark ? "22" : "14") : colors.card,
               borderColor:     pred ? aqiColor + (isDark ? "45" : "40") : colors.border,
-              minHeight: 160,
             }}
           >
             {/* Status first — category is the primary signal */}
-            <p className="text-[0.8125rem] font-semibold uppercase tracking-widest" style={{ color: colors.sub }}>
+            <p className="text-[0.6875rem] font-semibold uppercase tracking-widest" style={{ color: colors.sub }}>
               {t("home.air_now")}
             </p>
 
             {pred ? (
               <p
-                className="mt-2 font-black leading-tight"
-                style={{ fontSize: "1.75rem", color: aqiColor }}
+                className="mt-1 font-black leading-tight"
+                style={{ fontSize: "1.25rem", color: aqiColor }}
               >
-                <span aria-hidden="true" style={{ marginRight: 8 }}>
+                <span aria-hidden="true" style={{ marginRight: 6 }}>
                   {aqiSymbol(pred.aqi_category ?? pred.category)}
                 </span>
                 {t(aqiCategoryKey(pred.aqi_category ?? pred.category))}
               </p>
             ) : (
-              <p className="mt-2 font-black leading-tight" style={{ fontSize: "1.75rem", color: colors.sub }}>
+              <p className="mt-1 font-black leading-tight" style={{ fontSize: "1.25rem", color: colors.sub }}>
                 —
               </p>
             )}
 
             {/* PM2.5 secondary */}
-            <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+            <div className="mt-1.5 flex items-baseline gap-1.5 flex-wrap">
               <span
                 aria-hidden="true"
                 className="font-bold leading-none tabular-nums"
-                style={{ fontSize: "2rem", color: colors.text }}
+                style={{ fontSize: "1.5rem", color: colors.text }}
               >
                 {pred ? (loading ? "…" : displayNum) : "--"}
               </span>
-              <span className="text-sm font-semibold" style={{ color: colors.sub }}>
+              <span className="text-xs font-semibold" style={{ color: colors.sub }}>
                 µg/m³ PM2.5
               </span>
               {(pred?.degraded || state.homeSummary?.degraded) && (
                 <span
-                  className="rounded-full px-2.5 py-1 text-[0.8125rem] font-semibold"
+                  className="rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold"
                   style={{
                     backgroundColor: colors.cardAlt,
                     color: colors.subtext,
@@ -378,7 +380,7 @@ export function HomeScreen({ isOnline, isDark: isDarkProp }) {
             </div>
 
             {/* Location + time stamp */}
-            <p className="mt-3 text-sm" style={{ color: colors.sub }}>
+            <p className="mt-2 text-xs" style={{ color: colors.sub }}>
               {pred
                 ? `${pred.city?.name ?? ""} | ${t("card.today") ?? "Today"}, ${new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
                 : t("home.tap_check") ?? "Tap Check to get started"}
@@ -386,33 +388,31 @@ export function HomeScreen({ isOnline, isDark: isDarkProp }) {
 
             {pred && (
               <ChevronRight
-                size={22}
+                size={18}
                 color={colors.sub}
-                style={{ position: "absolute", top: 20, right: 16 }}
+                style={{ position: "absolute", top: 14, right: 12 }}
                 aria-hidden="true"
               />
             )}
           </button>
         </div>
 
-        {/* ── What to do ── */}
-        {pred?.insight && (
-          <div
-            className="mf-glass mx-4 mb-3 rounded-2xl p-4"
-            role="status"
-            aria-live="polite"
-          >
-            <p
-              className="mb-1.5 text-[0.8125rem] font-semibold uppercase tracking-widest"
-              style={{ color: colors.sub }}
-            >
-              {t("home.advice_title")}
-            </p>
-            <p className="text-base leading-6 m-0" style={{ color: colors.text }}>
-              {cleanGuidanceText(pred.insight)}
-            </p>
-          </div>
+        {selectedPollutant && (
+          <PollutantDetailSheet
+            pollutant={selectedPollutant}
+            city={pred?.city}
+            isDark={isDark}
+            colors={colors}
+            onClose={() => setSelectedPollutant(null)}
+          />
         )}
+
+        {/* ── What to do ── */}
+        <InsightsSection
+          pred={pred}
+          colors={colors}
+          firstName={state.session?.authenticated ? state.profile.firstName : undefined}
+        />
 
         {/* ── Action tiles ── */}
         <div className="mx-4 mb-3 flex gap-2.5">
@@ -453,6 +453,14 @@ export function HomeScreen({ isOnline, isDark: isDarkProp }) {
             );
           })}
         </div>
+
+        {/* ── What's in your air: PM2.5/PM10/NO2/O3, tap for detail ── */}
+        <ContributingFactorsGrid
+          pollutants={pred?.pollutants}
+          isDark={isDark}
+          colors={colors}
+          onSelect={setSelectedPollutant}
+        />
 
         {/* ── Did you know ── */}
         {fact && (
