@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,6 +29,17 @@ export function HealthProfileScreen() {
   const [selected, setSelected] = useState<Set<string>>(new Set(profile.healthConditions ?? []));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Belt-and-braces: the Profile menu already hides this link for guests, but
+  // the stack navigator could still be told to push it directly (e.g. a stale
+  // state restore after sign-out). Bounce to sign-in instead — personalization
+  // is meaningless without an account to save it to. PWA parity: see
+  // frontend-pwa's HealthProfileScreen.jsx.
+  useEffect(() => {
+    if (!isAuthenticated) navigation.replace('Login');
+  }, [isAuthenticated, navigation]);
+
+  if (!isAuthenticated) return null;
 
   function toggle(code: string) {
     setSelected((prev) => {

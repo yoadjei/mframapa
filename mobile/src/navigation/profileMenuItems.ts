@@ -8,6 +8,8 @@ export type ProfileMenuItem = {
   id: string;
   labelKey: string;
   screen: string;
+  /** Only shown when signed in — personalization needs an account (PWA parity). */
+  authOnly?: boolean;
 };
 
 /** FAB “+” menu — matches PWA GlassTabBar MORE_ITEMS (Search / Alerts / Activity / Settings). */
@@ -23,7 +25,7 @@ export type FabMoreItem = {
 /** Full product link list on Profile (same order as PWA ALL_MENU_ITEMS). */
 export const PROFILE_MENU_ITEMS: ProfileMenuItem[] = [
   { id: 'settings', labelKey: 'screen.profile.link_settings', screen: 'Settings' },
-  { id: 'health', labelKey: 'health_profile.title', screen: 'HealthProfile' },
+  { id: 'health', labelKey: 'health_profile.title', screen: 'HealthProfile', authOnly: true },
   { id: 'saved', labelKey: 'screen.profile.link_saved_locations', screen: 'SavedLocations' },
   { id: 'activity', labelKey: 'screen.profile.link_activity_feed', screen: 'ActivityFeed' },
   { id: 'ai', labelKey: 'screen.profile.link_ai_insights', screen: 'AIInsights' },

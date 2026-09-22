@@ -12,9 +12,11 @@ import { AvatarPickerSheet, naviiUrl, defaultSeedFor } from "../../components/ui
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog.jsx";
 
 // All profile menu items (PROFILE_MENU_ITEMS + MORE_MENU_ITEMS from mobile)
+// "health" is filtered out for anonymous users below — personalization only
+// works once signed in, so there is nothing for a guest to configure there.
 const ALL_MENU_ITEMS = [
   { id: "settings",  labelKey: "screen.profile.link_settings",       target: { type: "navigate", name: "settings" } },
-  { id: "health",    labelKey: "health_profile.title",               target: { type: "navigate", name: "healthProfile" } },
+  { id: "health",    labelKey: "health_profile.title",               target: { type: "navigate", name: "healthProfile" }, authOnly: true },
   { id: "saved",     labelKey: "screen.profile.link_saved_locations", target: { type: "navigate", name: "savedLocations" } },
   { id: "activity",  labelKey: "screen.profile.link_activity_feed",  target: { type: "navigate", name: "activity" } },
   { id: "ai",        labelKey: "screen.profile.link_ai_insights",    target: { type: "navigate", name: "aiInsights" } },
@@ -236,7 +238,7 @@ export function ProfileScreen({ isOnline, isDark }) {
 
         {/* Menu links */}
         <div className="mt-6" style={{ borderTop: `1px solid ${colors.border}` }}>
-          {ALL_MENU_ITEMS.map((item) => (
+          {ALL_MENU_ITEMS.filter((item) => !item.authOnly || authenticated).map((item) => (
             <button
               key={item.id}
               type="button"

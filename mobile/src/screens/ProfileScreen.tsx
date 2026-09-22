@@ -115,7 +115,7 @@ export function ProfileScreen() {
         )}
 
         <View style={[styles.links, { borderTopColor: colors.border }]}>
-          {PROFILE_MENU_ITEMS.map((item) => (
+          {PROFILE_MENU_ITEMS.filter((item) => !item.authOnly || hasAccount).map((item) => (
             <TouchableOpacity
               key={item.screen}
               onPress={() => navigation.navigate(item.screen)}

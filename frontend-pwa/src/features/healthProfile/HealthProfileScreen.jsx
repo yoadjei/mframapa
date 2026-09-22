@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppState } from "../../state/appState.jsx";
 import { useNavigation } from "../../hooks/useNavigation.js";
 import { useTranslation } from "../../hooks/useTranslation.js";
@@ -11,11 +11,21 @@ import { HealthProfileForm } from "./HealthProfileForm.jsx";
 export function HealthProfileScreen({ isDark }) {
   const { state, dispatch } = useAppState();
   const { t } = useTranslation();
-  const { goBack } = useNavigation();
+  const { goBack, navigate } = useNavigation();
   const colors = getColors(isDark);
   const inStack = useStackChrome();
   const authenticated = state.session?.authenticated;
   const [deleting, setDeleting] = useState(false);
+
+  // Belt-and-braces: the Profile menu already hides this link for guests, but
+  // the screen stack persists to localStorage, so a stale entry (e.g. after
+  // signing out) could still land someone here. Bounce to sign-in instead —
+  // personalization is meaningless without an account to save it to.
+  useEffect(() => {
+    if (!authenticated) navigate("auth", { mode: "login" });
+  }, [authenticated, navigate]);
+
+  if (!authenticated) return null;
 
   async function handleDelete() {
     setDeleting(true);
