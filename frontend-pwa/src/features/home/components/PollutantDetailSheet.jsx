@@ -65,6 +65,21 @@ export function PollutantDetailSheet({ pollutant, city, isDark, colors, onClose 
     return () => { active = false; };
   }, [pollutant.code, city?.lat, city?.lon, city?.name]);
 
+  // Home scrolls the document itself (no nested scroller), so a drag on this
+  // sheet would otherwise scroll the page behind it once the touch reaches
+  // the sheet's own scroll limit. Lock the document scroller while open so
+  // the drag stays on the sheet.
+  useEffect(() => {
+    const { overflow: htmlOverflow } = document.documentElement.style;
+    const { overflow: bodyOverflow } = document.body.style;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.style.overflow = htmlOverflow;
+      document.body.style.overflow = bodyOverflow;
+    };
+  }, []);
+
   const color = pollutantSeverityColor(pollutant.severity, isDark);
 
   return (
