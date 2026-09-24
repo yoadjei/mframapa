@@ -69,7 +69,7 @@ export function PollutantDetailSheet({ pollutant, city, isDark, colors, onClose 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center"
+      className="fixed inset-0 z-[85] flex items-end justify-center"
       style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
       onClick={onClose}
       role="dialog"
